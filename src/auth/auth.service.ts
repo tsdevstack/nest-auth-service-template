@@ -41,7 +41,6 @@ export class AuthService implements OnModuleInit {
     private config: ConfigService,
     private secrets: SecretsService,
     @InjectQueue('notifications') private notificationQueue: Queue,
-    @InjectQueue('welcome') private welcomeQueue: Queue,
     logger: LoggerService,
   ) {
     this.logger = logger.child('AuthService');
@@ -258,12 +257,6 @@ export class AuthService implements OnModuleInit {
     // Delete the used token
     await this.prisma.confirmationToken.delete({
       where: { id: confirmationToken.id },
-    });
-
-    // Queue welcome email (processed by standalone worker)
-    await this.welcomeQueue.add('welcome-email', {
-      to: confirmationToken.user.email,
-      firstName: confirmationToken.user.firstName,
     });
 
     return { message: 'Email confirmed successfully' };

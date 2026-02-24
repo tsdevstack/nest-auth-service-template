@@ -27,7 +27,6 @@ export class NotificationProcessor extends WorkerHost {
     this.logger.log(`Processing ${job.name} job ${job.id}`);
 
     switch (job.name) {
-      case 'welcome-email':
       case 'confirmation-email':
       case 'password-reset':
       default:

@@ -32,8 +32,6 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "tsc": "tsc --noEmit",
     "dev": "nest start --watch",
-    "start-worker:dev": "nest start --entryFile worker --watch",
-    "start-worker": "node dist/worker.js",
     "docs:generate": "ts-node --transpile-only --compiler-options '{\"module\":\"commonjs\",\"moduleResolution\":\"node\",\"resolvePackageJsonExports\":false}' scripts/generate-openapi.ts",
     "client:generate": "tsdevstack generate-client --input ./docs/openapi.json",
     "db:seed": "npx prisma db seed"
@@ -106,7 +104,6 @@
       "**/*.(t|j)s",
       "!**/generated/**",
       "!**/main.ts",
-      "!**/worker.ts",
       "!**/*.module.ts",
       "!**/types/index.ts",
       "!**/prisma/prisma.service.ts"

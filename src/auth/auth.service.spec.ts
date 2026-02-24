@@ -40,7 +40,6 @@ describe('AuthService', () => {
   let mockConfigService: { get: jest.Mock };
   let mockSecretsService: { get: jest.Mock };
   let mockNotificationQueue: { add: jest.Mock };
-  let mockWelcomeQueue: { add: jest.Mock };
   let mockLoggerService: {
     child: jest.Mock;
     debug: jest.Mock;
@@ -112,10 +111,6 @@ describe('AuthService', () => {
       add: jest.fn().mockResolvedValue({ id: 'job-1' }),
     };
 
-    mockWelcomeQueue = {
-      add: jest.fn().mockResolvedValue({ id: 'job-2' }),
-    };
-
     mockLoggerService = {
       child: jest.fn().mockReturnThis(),
       debug: jest.fn(),
@@ -133,10 +128,6 @@ describe('AuthService', () => {
         {
           provide: getQueueToken('notifications'),
           useValue: mockNotificationQueue,
-        },
-        {
-          provide: getQueueToken('welcome'),
-          useValue: mockWelcomeQueue,
         },
         { provide: LoggerService, useValue: mockLoggerService },
       ],

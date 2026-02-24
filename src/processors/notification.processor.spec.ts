@@ -80,20 +80,6 @@ describe('NotificationProcessor', () => {
       );
     });
 
-    it('should send email with job data for welcome-email', async () => {
-      const job = createMockJob({
-        id: 'job-3',
-        name: 'welcome-email',
-        data: mockJobData,
-      });
-
-      await processor.process(job);
-
-      expect(mockNotificationService.sendEmail).toHaveBeenCalledWith(
-        mockJobData,
-      );
-    });
-
     it('should handle unknown job names via default case', async () => {
       const job = createMockJob({
         id: 'job-4',

@@ -10,7 +10,6 @@ import { JwksController } from './jwks.controller';
   imports: [
     ConfigModule,
     BullModule.registerQueue({ name: 'notifications' }),
-    BullModule.registerQueue({ name: 'welcome' }),
   ],
   controllers: [AuthController, JwksController],
   providers: [AuthService, JwtService],
