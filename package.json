@@ -32,12 +32,12 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "tsc": "tsc --noEmit",
     "dev": "nest start --watch",
-    "docs:generate": "ts-node --transpile-only --compiler-options '{\"module\":\"commonjs\",\"moduleResolution\":\"node\",\"resolvePackageJsonExports\":false}' scripts/generate-openapi.ts",
+    "docs:generate": "ts-node --transpile-only scripts/generate-openapi.ts",
     "client:generate": "tsdevstack generate-client --input ./docs/openapi.json",
     "db:seed": "npx prisma db seed"
   },
   "dependencies": {
-    "@tsdevstack/nest-common": "^0.3.0",
+    "@tsdevstack/nest-common": "^0.5.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.1",
@@ -86,8 +86,8 @@
     "ts-loader": "^9.5.2",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
-    "typescript": "^5.7.3",
-    "typescript-eslint": "^8.20.0"
+    "typescript": "~6.0.0",
+    "typescript-eslint": "^8.63.0"
   },
   "jest": {
     "moduleFileExtensions": [
