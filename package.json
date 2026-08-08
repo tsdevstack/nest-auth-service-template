@@ -37,7 +37,7 @@
     "db:seed": "npx prisma db seed"
   },
   "dependencies": {
-    "@tsdevstack/nest-common": "^0.6.1",
+    "@tsdevstack/nest-common": "^0.7.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.1",
