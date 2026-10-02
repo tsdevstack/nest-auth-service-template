@@ -1,7 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { UnauthorizedException } from '@nestjs/common';
+import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { UserController } from './user.controller';
 import { UserService } from './user.service';
+import { AuthService } from '../auth/auth.service';
 import { RateLimitGuard } from '@tsdevstack/nest-common';
 import type { AuthenticatedRequest } from '@tsdevstack/nest-common';
 
@@ -17,13 +18,17 @@ describe('UserController', () => {
     getUserAccount: jest.Mock;
     updateUserAccount: jest.Mock;
   };
+  let mockAuthService: {
+    changePassword: jest.Mock;
+  };
 
   const mockUser = {
     id: 'user-123',
     email: 'test@example.com',
     firstName: 'John',
     lastName: 'Doe',
-    role: 'USER',
+    systemRole: 'USER',
+    roles: [] as string[],
     confirmed: true,
     status: 'ACTIVE',
     createdAt: new Date('2024-01-01'),
@@ -39,14 +44,14 @@ describe('UserController', () => {
     id?: string;
     confirmed?: boolean;
     email?: string;
-    role?: string;
+    systemRole?: string;
   }): AuthenticatedRequest {
     return {
       user: {
         id: overrides.id ?? 'user-123',
         confirmed: overrides.confirmed ?? true,
         email: overrides.email ?? 'test@example.com',
-        role: overrides.role ?? 'USER',
+        systemRole: overrides.systemRole ?? 'USER',
       },
     } as unknown as AuthenticatedRequest;
   }
@@ -56,10 +61,16 @@ describe('UserController', () => {
       getUserAccount: jest.fn(),
       updateUserAccount: jest.fn(),
     };
+    mockAuthService = {
+      changePassword: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [UserController],
-      providers: [{ provide: UserService, useValue: mockUserService }],
+      providers: [
+        { provide: UserService, useValue: mockUserService },
+        { provide: AuthService, useValue: mockAuthService },
+      ],
     })
       .overrideGuard(RateLimitGuard)
       .useValue({ canActivate: () => true })
@@ -262,6 +273,67 @@ describe('UserController', () => {
           controller.updateAccount(request, updateData),
         ).rejects.toThrow(UnauthorizedException);
       });
+    });
+  });
+
+  describe('PUT /user/password (changePassword)', () => {
+    const dto = { currentPassword: 'OldPass123', newPassword: 'NewPass123' };
+    const tokens = { accessToken: 'access', refreshToken: 'refresh' };
+
+    it('should change the password of the authenticated user', async () => {
+      mockAuthService.changePassword.mockResolvedValue(tokens);
+
+      const result = await controller.changePassword(
+        createMockRequest({ id: 'user-123' }),
+        dto,
+      );
+
+      expect(result).toEqual(tokens);
+      expect(mockAuthService.changePassword).toHaveBeenCalledWith(
+        'user-123',
+        dto,
+      );
+    });
+
+    it('should throw UnauthorizedException without a user', async () => {
+      const request = { user: undefined } as unknown as AuthenticatedRequest;
+
+      await expect(controller.changePassword(request, dto)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockAuthService.changePassword).not.toHaveBeenCalled();
+    });
+
+    it('should require a confirmed email', async () => {
+      await expect(
+        controller.changePassword(createMockRequest({ confirmed: false }), dto),
+      ).rejects.toThrow('Email not confirmed');
+      expect(mockAuthService.changePassword).not.toHaveBeenCalled();
+    });
+
+    it('should limit attempts to 5 per user per 15 minutes', () => {
+      const handler = Object.getOwnPropertyDescriptor(
+        UserController.prototype,
+        'changePassword',
+      )?.value as object;
+      // RATE_LIMIT_KEY of @tsdevstack/nest-common (not exported)
+      const options = Reflect.getMetadata('rateLimit', handler) as {
+        maxRequests: number;
+        windowMs: number;
+        customKeyGenerator: (context: ExecutionContext) => string;
+      };
+
+      expect(options.maxRequests).toBe(5);
+      expect(options.windowMs).toBe(15 * 60 * 1000);
+
+      const context = {
+        switchToHttp: () => ({
+          getRequest: () => ({ user: { id: 'user-123' } }),
+        }),
+      } as unknown as ExecutionContext;
+      expect(options.customKeyGenerator(context)).toBe(
+        'change-password:user-123',
+      );
     });
   });
 });

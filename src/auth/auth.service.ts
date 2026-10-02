@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   UnauthorizedException,
   ConflictException,
@@ -20,6 +21,13 @@ import { JwtService } from './jwt.service';
 import { createHash } from 'crypto';
 import { TokenDto } from './dto/token.dto';
 import { ReturnMessageDto } from './dto/return-message.dto';
+import { ChangePasswordDto } from '../user/dto/change-password.dto';
+import { parseAdminEmails } from '../roles/parse-admin-emails';
+import { SystemRole } from '../generated/prisma/enums';
+import {
+  ADMIN_EMAILS_UNSET_CACHE_MS,
+  ASCII_EMAIL_PATTERN,
+} from './auth.constants';
 
 interface GenerateConfirmationTokenReturn {
   token: string;
@@ -34,6 +42,8 @@ export class AuthService implements OnModuleInit {
   private bcryptRounds!: number;
   private appUrl!: string;
   private readonly logger: LoggerService;
+  /** Until when ADMIN_EMAILS is known to be missing or empty (epoch ms) */
+  private adminEmailsUnsetUntil = 0;
 
   constructor(
     private prisma: PrismaService,
@@ -79,19 +89,128 @@ export class AuthService implements OnModuleInit {
   private buildJwtPayload(user: {
     id: string;
     email: string;
-    role: string;
+    systemRole: SystemRole;
+    roles: string[];
     confirmed: boolean;
     status: string;
   }): Omit<JwtPayload, 'iat' | 'exp'> {
     return {
       sub: user.id,
       email: user.email,
-      role: user.role,
+      systemRole: user.systemRole,
+      roles: user.roles,
       confirmed: user.confirmed,
       status: user.status as 'ACTIVE' | 'INACTIVE',
       iss: 'auth-service',
       aud: 'kong',
     };
+  }
+
+  /**
+   * Promote a confirmed user listed in the `ADMIN_EMAILS` secret to `ADMIN`.
+   *
+   * Runs at login, so the promotion is in the token issued by that login.
+   * Idempotent: users who are already admins are left alone. Also the
+   * recovery path when every admin was demoted.
+   *
+   * @returns The user as stored after the check
+   */
+  private async promoteListedAdmin<
+    T extends {
+      id: string;
+      email: string;
+      confirmed: boolean;
+      systemRole: SystemRole;
+    },
+  >(user: T): Promise<T> {
+    if (!user.confirmed || user.systemRole === SystemRole.ADMIN) {
+      return user;
+    }
+
+    // Only ASCII addresses are compared: case folding of other characters
+    // can map a different address onto a listed one (for example the Kelvin
+    // sign U+212A lowercases to "k").
+    if (!ASCII_EMAIL_PATTERN.test(user.email)) {
+      return user;
+    }
+
+    const adminEmails = await this.loadAdminEmails();
+
+    if (!adminEmails.has(user.email.trim().toLowerCase())) {
+      return user;
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { systemRole: SystemRole.ADMIN },
+    });
+
+    this.logger.info('User promoted to ADMIN through ADMIN_EMAILS', {
+      userId: user.id,
+    });
+
+    return { ...user, systemRole: SystemRole.ADMIN };
+  }
+
+  /**
+   * Read `ADMIN_EMAILS`. The secret is optional: missing or empty means
+   * nobody is promoted, and that answer is remembered for a short while.
+   */
+  private async loadAdminEmails(): Promise<Set<string>> {
+    if (Date.now() < this.adminEmailsUnsetUntil) {
+      return new Set();
+    }
+
+    let adminEmails: Set<string>;
+    try {
+      adminEmails = parseAdminEmails(await this.secrets.get('ADMIN_EMAILS'));
+    } catch (error) {
+      this.logger.debug('ADMIN_EMAILS not available, skipping promotion', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      adminEmails = new Set();
+    }
+
+    if (adminEmails.size === 0) {
+      this.adminEmailsUnsetUntil = Date.now() + ADMIN_EMAILS_UNSET_CACHE_MS;
+    }
+
+    return adminEmails;
+  }
+
+  /**
+   * Issue an access token and a stored refresh token for a user.
+   */
+  private async issueTokens(user: {
+    id: string;
+    email: string;
+    systemRole: SystemRole;
+    roles: string[];
+    confirmed: boolean;
+    status: string;
+  }): Promise<TokenDto> {
+    const payload = this.buildJwtPayload(user);
+
+    const accessToken = await this.jwtService.sign(
+      payload,
+      `${this.accessTokenTtl}s`,
+    );
+
+    const {
+      token: refreshToken,
+      hash,
+      expiresAt,
+    } = this.generateRefreshToken();
+
+    await this.prisma.refreshToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: hash,
+        expiresAt,
+      },
+    });
+
+    return { accessToken, refreshToken };
   }
 
   private generateRefreshToken(): {
@@ -190,30 +309,59 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const payload = this.buildJwtPayload(user);
+    // First admin and recovery path: promote users listed in ADMIN_EMAILS
+    const currentUser = await this.promoteListedAdmin(user);
 
-    const accessToken = await this.jwtService.sign(
-      payload,
-      `${this.accessTokenTtl}s`,
-    );
+    return await this.issueTokens(currentUser);
+  }
 
-    // Generate a random refresh token
-    const {
-      token: refreshToken,
-      hash,
-      expiresAt,
-    } = this.generateRefreshToken();
+  /**
+   * Change the password of a logged-in user.
+   *
+   * Verifies the current password, stores the new one and revokes every
+   * refresh token of the user, so other sessions end at their next refresh.
+   * Returns a fresh token pair so the calling session continues.
+   */
+  async changePassword(
+    userId: string,
+    changePasswordDto: ChangePasswordDto,
+  ): Promise<TokenDto> {
+    const { currentPassword, newPassword } = changePasswordDto;
 
-    // Store the refresh token hash in the DB
-    await this.prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tokenHash: hash,
-        expiresAt,
-      },
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
     });
 
-    return { accessToken, refreshToken };
+    if (!user) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const isPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.passwordHash,
+    );
+    if (!isPasswordValid) {
+      // 400, not 401: the caller is authenticated, and a 401 would log it out
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, this.bcryptRounds);
+
+    await this.prisma.$transaction(async (prisma) => {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash },
+      });
+
+      // Revoke every session; the caller gets a new pair below
+      await prisma.refreshToken.deleteMany({
+        where: { userId: user.id },
+      });
+    });
+
+    this.logger.info('Password changed', { userId: user.id });
+
+    return await this.issueTokens(user);
   }
 
   async confirmEmail(token: string): Promise<ReturnMessageDto> {

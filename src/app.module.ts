@@ -3,6 +3,8 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core';
 import { UserModule } from './user/user.module';
 import { AuthModule } from './auth/auth.module';
+import { AdminModule } from './admin/admin.module';
+import { ApiKeysModule } from './api-keys/api-keys.module';
 import { JobsModule } from './jobs/jobs.module';
 import {
   RateLimitHeadersInterceptor,
@@ -31,6 +33,8 @@ import { ProcessorsModule } from './processors/processors.module';
     RedisModule,
     UserModule,
     AuthModule,
+    AdminModule,
+    ApiKeysModule,
     RateLimitModule,
     EmailRateLimitModule,
     NotificationModule,

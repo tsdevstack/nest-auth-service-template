@@ -21,10 +21,12 @@ model User {
   confirmed           Boolean  @default(false)
   status              UserStatus @default(INACTIVE)
   createdAt           DateTime @default(now())
-  role                UserType @default(USER)
+  systemRole          SystemRole @default(USER)
+  roles               String[] @default([]) // Custom roles, declared in src/roles/roles.constants.ts
   confirmationTokens  ConfirmationToken[]
   passwordResetTokens PasswordResetToken[]
   tokenHash           RefreshToken[]
+  apiKeys             ApiKey[]
 }
 
 model ConfirmationToken {
@@ -56,12 +58,50 @@ model RefreshToken {
   @@index([userId])
 }
 
+model ApiKey {
+  id             String        @id @default(cuid())
+  name           String
+  prefix         String // First 12 characters of the key, display only
+  keyHash        String        @unique // sha256 hex of the key; the key itself is never stored
+  consumer       String // Who the key is for, e.g. acme-corp; not a user
+  createdById    String // Admin who created the key (audit only)
+  createdBy      User          @relation(fields: [createdById], references: [id])
+  limitPerMinute Int?
+  limitPerHour   Int?
+  limitPerDay    Int?
+  limitPerWeek   Int?
+  limitPerMonth  Int?
+  status         ApiKeyStatus  @default(ACTIVE)
+  expiresAt      DateTime?
+  lastUsedAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  usage          ApiKeyUsage[]
+
+  @@index([consumer])
+}
+
+model ApiKeyUsage {
+  keyId  String
+  period String // ISO week (2026-W40) or month (2026-09), UTC
+  count  BigInt // Requests admitted in the period (a month can exceed 2^31)
+  key    ApiKey @relation(fields: [keyId], references: [id], onDelete: Cascade)
+
+  @@id([keyId, period])
+}
+
 enum UserStatus {
   ACTIVE
   INACTIVE
 }
 
-enum UserType {
+enum SystemRole {
   USER
   ADMIN
+}
+
+enum ApiKeyStatus {
+  ACTIVE
+  REVOKED
 }

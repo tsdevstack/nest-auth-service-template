@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { UnauthorizedException, ConflictException } from '@nestjs/common';
+import {
+  UnauthorizedException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getQueueToken } from '@nestjs/bullmq';
 import { AuthService } from './auth.service';
@@ -53,7 +57,8 @@ describe('AuthService', () => {
     firstName: 'John',
     lastName: 'Doe',
     passwordHash: 'hashed-password',
-    role: 'USER',
+    systemRole: 'USER',
+    roles: [] as string[],
     confirmed: true,
     status: 'ACTIVE',
     createdAt: new Date(),
@@ -268,13 +273,277 @@ describe('AuthService', () => {
         expect.objectContaining({
           sub: mockUser.id,
           email: mockUser.email,
-          role: mockUser.role,
+          systemRole: mockUser.systemRole,
+          roles: mockUser.roles,
           confirmed: mockUser.confirmed,
           status: mockUser.status,
           iss: 'auth-service',
           aud: 'kong',
         }),
         expect.any(String),
+      );
+    });
+  });
+
+  describe('login: ADMIN_EMAILS promotion', () => {
+    const loginDto = { email: 'test@example.com', password: 'password123' };
+
+    function mockAdminEmails(value: string | Error): void {
+      mockSecretsService.get.mockImplementation((key: string) => {
+        if (key === 'ADMIN_EMAILS') {
+          return value instanceof Error
+            ? Promise.reject(value)
+            : Promise.resolve(value);
+        }
+        return Promise.resolve('');
+      });
+    }
+
+    beforeEach(() => {
+      mockPrismaService.refreshToken.create.mockResolvedValue({});
+      mockPrismaService.user.update.mockResolvedValue({});
+    });
+
+    it('should promote a confirmed user whose email is listed', async () => {
+      mockAdminEmails('other@example.com, Test@Example.com ');
+      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+
+      await service.login(loginDto);
+
+      expect(mockPrismaService.user.update).toHaveBeenCalledWith({
+        where: { id: mockUser.id },
+        data: { systemRole: 'ADMIN' },
+      });
+      expect(mockLoggerService.info).toHaveBeenCalledWith(
+        'User promoted to ADMIN through ADMIN_EMAILS',
+        { userId: mockUser.id },
+      );
+    });
+
+    it('should put the promoted role into the token of that login', async () => {
+      mockAdminEmails('test@example.com');
+      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+
+      await service.login(loginDto);
+
+      expect(mockJwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ systemRole: 'ADMIN' }),
+        expect.any(String),
+      );
+    });
+
+    it('should not promote an unconfirmed user', async () => {
+      mockAdminEmails('test@example.com');
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        confirmed: false,
+        status: 'INACTIVE',
+      });
+
+      await service.login(loginDto);
+
+      expect(mockPrismaService.user.update).not.toHaveBeenCalled();
+      expect(mockJwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ systemRole: 'USER' }),
+        expect.any(String),
+      );
+    });
+
+    it('should not promote a user whose email is not listed', async () => {
+      mockAdminEmails('someone-else@example.com');
+      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+
+      await service.login(loginDto);
+
+      expect(mockPrismaService.user.update).not.toHaveBeenCalled();
+    });
+
+    it('should leave an existing admin alone (idempotent)', async () => {
+      mockAdminEmails('test@example.com');
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        systemRole: 'ADMIN',
+      });
+
+      await service.login(loginDto);
+
+      expect(mockPrismaService.user.update).not.toHaveBeenCalled();
+      expect(mockSecretsService.get).not.toHaveBeenCalledWith('ADMIN_EMAILS');
+    });
+
+    it('should log in normally when ADMIN_EMAILS is not set', async () => {
+      mockAdminEmails(new Error('Secret "ADMIN_EMAILS" not found'));
+      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+
+      const result = await service.login(loginDto);
+
+      expect(result).toHaveProperty('accessToken');
+      expect(mockPrismaService.user.update).not.toHaveBeenCalled();
+    });
+
+    it('should promote a listed user whose stored email has mixed case', async () => {
+      mockAdminEmails('test@example.com');
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        email: 'Test@Example.COM',
+      });
+
+      await service.login({ ...loginDto, email: 'Test@Example.COM' });
+
+      expect(mockPrismaService.user.update).toHaveBeenCalledWith({
+        where: { id: mockUser.id },
+        data: { systemRole: 'ADMIN' },
+      });
+    });
+
+    it('should not promote a non-ASCII email that folds onto a listed one (Kelvin sign)', async () => {
+      // U+212A KELVIN SIGN lowercases to "k"
+      const kelvinEmail = '\u212Aate@example.com';
+      expect(kelvinEmail.toLowerCase()).toBe('kate@example.com');
+      mockAdminEmails('kate@example.com');
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        email: kelvinEmail,
+      });
+
+      await service.login({ ...loginDto, email: kelvinEmail });
+
+      expect(mockPrismaService.user.update).not.toHaveBeenCalled();
+      expect(mockJwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ systemRole: 'USER' }),
+        expect.any(String),
+      );
+    });
+
+    it('should remember a missing ADMIN_EMAILS for a minute', async () => {
+      const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      try {
+        mockAdminEmails(new Error('Secret "ADMIN_EMAILS" not found'));
+        mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+        const adminEmailReads = (): number =>
+          mockSecretsService.get.mock.calls.filter(
+            (call: unknown[]) => call[0] === 'ADMIN_EMAILS',
+          ).length;
+
+        await service.login(loginDto);
+        await service.login(loginDto);
+        expect(adminEmailReads()).toBe(1);
+
+        nowSpy.mockReturnValue(1_000_000 + 60_001);
+        await service.login(loginDto);
+        expect(adminEmailReads()).toBe(2);
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
+
+    it('should remember an empty ADMIN_EMAILS too', async () => {
+      mockAdminEmails(' , ');
+      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+
+      await service.login(loginDto);
+      await service.login(loginDto);
+
+      expect(
+        mockSecretsService.get.mock.calls.filter(
+          (call: unknown[]) => call[0] === 'ADMIN_EMAILS',
+        ),
+      ).toHaveLength(1);
+    });
+
+    it('should read a set ADMIN_EMAILS on every login (SecretsService caches it)', async () => {
+      mockAdminEmails('someone-else@example.com');
+      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+
+      await service.login(loginDto);
+      await service.login(loginDto);
+
+      expect(
+        mockSecretsService.get.mock.calls.filter(
+          (call: unknown[]) => call[0] === 'ADMIN_EMAILS',
+        ),
+      ).toHaveLength(2);
+    });
+
+    it('should not promote before the password is verified', async () => {
+      mockAdminEmails('test@example.com');
+      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+
+      await expect(service.login(loginDto)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockPrismaService.user.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('changePassword', () => {
+    const dto = { currentPassword: 'OldPass123', newPassword: 'NewPass123' };
+
+    beforeEach(() => {
+      mockPrismaService.user.update.mockResolvedValue({});
+      mockPrismaService.refreshToken.deleteMany.mockResolvedValue({});
+      mockPrismaService.refreshToken.create.mockResolvedValue({});
+    });
+
+    it('should store the new password hash', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+
+      await service.changePassword(mockUser.id, dto);
+
+      expect(bcrypt.compare).toHaveBeenCalledWith(
+        dto.currentPassword,
+        mockUser.passwordHash,
+      );
+      expect(bcrypt.hash).toHaveBeenCalledWith(dto.newPassword, 12);
+      expect(mockPrismaService.user.update).toHaveBeenCalledWith({
+        where: { id: mockUser.id },
+        data: { passwordHash: 'hashed-password' },
+      });
+    });
+
+    it('should revoke every refresh token of the user', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+
+      await service.changePassword(mockUser.id, dto);
+
+      expect(mockPrismaService.refreshToken.deleteMany).toHaveBeenCalledWith({
+        where: { userId: mockUser.id },
+      });
+    });
+
+    it('should return a new token pair for the calling session', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+
+      const result = await service.changePassword(mockUser.id, dto);
+
+      expect(result.accessToken).toBe('mock-access-token');
+      expect(typeof result.refreshToken).toBe('string');
+      // The new refresh token is stored after the old ones are revoked
+      const deleteOrder =
+        mockPrismaService.refreshToken.deleteMany.mock.invocationCallOrder[0];
+      const createOrder =
+        mockPrismaService.refreshToken.create.mock.invocationCallOrder[0];
+      expect(createOrder).toBeGreaterThan(deleteOrder);
+    });
+
+    it('should reject a wrong current password with 400 and change nothing', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+
+      await expect(service.changePassword(mockUser.id, dto)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(mockPrismaService.user.update).not.toHaveBeenCalled();
+      expect(mockPrismaService.refreshToken.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrismaService.refreshToken.create).not.toHaveBeenCalled();
+    });
+
+    it('should reject an unknown user', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.changePassword('missing', dto)).rejects.toThrow(
+        UnauthorizedException,
       );
     });
   });

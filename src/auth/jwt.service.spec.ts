@@ -111,7 +111,7 @@ describe('JwtService', () => {
       const payload = {
         sub: 'user-123',
         email: 'test@example.com',
-        role: 'USER',
+        systemRole: 'USER',
       };
 
       const token = await service.sign(payload, '1h');

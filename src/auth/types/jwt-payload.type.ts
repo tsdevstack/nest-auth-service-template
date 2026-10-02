@@ -6,7 +6,8 @@
 export interface JwtPayload {
   sub: string; // User ID
   email: string;
-  role: string;
+  systemRole: 'USER' | 'ADMIN'; // Framework-owned role
+  roles: string[]; // Custom roles, declared in src/roles/roles.constants.ts
   confirmed: boolean;
   status: 'ACTIVE' | 'INACTIVE';
   iss: string; // Issuer claim (e.g., 'auth-service')

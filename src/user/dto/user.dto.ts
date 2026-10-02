@@ -52,10 +52,18 @@ export class UserDto {
   createdAt: Date;
 
   @ApiProperty({
-    description: 'User role in the system',
+    description: 'System role, owned by the framework',
     example: 'USER',
     enum: ['USER', 'ADMIN'],
     type: String,
   })
-  role: 'USER' | 'ADMIN';
+  systemRole: 'USER' | 'ADMIN';
+
+  @ApiProperty({
+    description:
+      'Custom roles of the product (declared in src/roles/roles.constants.ts)',
+    example: [],
+    type: [String],
+  })
+  roles: string[];
 }
