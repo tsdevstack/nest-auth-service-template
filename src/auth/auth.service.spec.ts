@@ -285,6 +285,113 @@ describe('AuthService', () => {
     });
   });
 
+  describe('email letter case', () => {
+    const legacyUser = { ...mockUser, email: 'Legacy@Example.com' };
+
+    it('should store a new account under the lowercase address', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.user.create.mockResolvedValue({
+        ...mockUser,
+        id: 'new-user-id',
+      });
+
+      await service.signup({
+        firstName: 'John',
+        lastName: 'Doe',
+        email: ' New.User@Example.COM ',
+        password: 'password123',
+      });
+
+      const createArgs = mockPrismaService.user.create.mock.calls[0] as [
+        { data: { email: string } },
+      ];
+      expect(createArgs[0].data.email).toBe('new.user@example.com');
+      expect(mockNotificationQueue.add).toHaveBeenCalledWith(
+        'confirmation-email',
+        expect.objectContaining({ to: 'new.user@example.com' }),
+      );
+    });
+
+    it('should reject a signup that differs from an existing account only in case', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+
+      await expect(
+        service.signup({
+          firstName: 'John',
+          lastName: 'Doe',
+          email: 'TEST@example.com',
+          password: 'password123',
+        }),
+      ).rejects.toThrow(ConflictException);
+      expect(mockPrismaService.user.findUnique).toHaveBeenCalledWith({
+        where: { email: 'test@example.com' },
+      });
+    });
+
+    it('should log in with any letter case', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+      mockPrismaService.refreshToken.create.mockResolvedValue({});
+
+      await service.login({ email: 'Test@Example.com', password: 'pw' });
+
+      expect(mockPrismaService.user.findUnique).toHaveBeenCalledTimes(1);
+      expect(mockPrismaService.user.findUnique).toHaveBeenCalledWith({
+        where: { email: 'test@example.com' },
+      });
+    });
+
+    it('should still find an account stored with the case it was typed with', async () => {
+      mockPrismaService.user.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(legacyUser);
+      mockPrismaService.refreshToken.create.mockResolvedValue({});
+
+      const result = await service.login({
+        email: 'Legacy@Example.com',
+        password: 'pw',
+      });
+
+      expect(result).toHaveProperty('accessToken');
+      expect(mockPrismaService.user.findUnique).toHaveBeenNthCalledWith(2, {
+        where: { email: 'Legacy@Example.com' },
+      });
+    });
+
+    it('should look up once when the typed address is already lowercase', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.login({ email: 'nobody@example.com', password: 'pw' }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(mockPrismaService.user.findUnique).toHaveBeenCalledTimes(1);
+    });
+
+    it('should send the reset link to the stored address, not the typed one', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+
+      await service.forgotPassword({ email: 'TEST@EXAMPLE.COM' });
+
+      expect(mockNotificationQueue.add).toHaveBeenCalledWith(
+        'password-reset',
+        expect.objectContaining({ to: 'test@example.com' }),
+      );
+    });
+
+    it('should resend the confirmation to the stored address, not the typed one', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        confirmed: false,
+      });
+
+      await service.resendConfirmation('TEST@EXAMPLE.COM');
+
+      expect(mockNotificationQueue.add).toHaveBeenCalledWith(
+        'confirmation-email',
+        expect.objectContaining({ to: 'test@example.com' }),
+      );
+    });
+  });
+
   describe('login: ADMIN_EMAILS promotion', () => {
     const loginDto = { email: 'test@example.com', password: 'password123' };
 

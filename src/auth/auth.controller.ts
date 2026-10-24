@@ -309,7 +309,7 @@ export class AuthController {
     keyGenerator: 'ip',
     maxRequests: 10,
     windowMs: 15 * 60 * 1000,
-    message: 'Too many refresh attempts from this IP',
+    message: 'Too many logout attempts from this IP',
   })
   async logout(
     @Body() refreshTokenDto: RefreshTokenDto,

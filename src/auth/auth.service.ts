@@ -23,7 +23,9 @@ import { TokenDto } from './dto/token.dto';
 import { ReturnMessageDto } from './dto/return-message.dto';
 import { ChangePasswordDto } from '../user/dto/change-password.dto';
 import { parseAdminEmails } from '../roles/parse-admin-emails';
+import { normalizeEmail } from './normalize-email';
 import { SystemRole } from '../generated/prisma/enums';
+import type { User } from '../generated/prisma/client';
 import {
   ADMIN_EMAILS_UNSET_CACHE_MS,
   ASCII_EMAIL_PATTERN,
@@ -84,6 +86,26 @@ export class AuthService implements OnModuleInit {
 
   private createHash(token: string): string {
     return createHash('sha256').update(token).digest('hex');
+  }
+
+  /**
+   * Find a user by email, ignoring letter case.
+   *
+   * Accounts store the normalized address. Accounts created before that
+   * keep the address as it was typed, so when the normalized lookup misses,
+   * the typed address is tried as is (they keep working as before).
+   */
+  private async findUserByEmail(email: string): Promise<User | null> {
+    const normalized = normalizeEmail(email);
+    const user = await this.prisma.user.findUnique({
+      where: { email: normalized },
+    });
+
+    if (user || normalized === email) {
+      return user;
+    }
+
+    return this.prisma.user.findUnique({ where: { email } });
   }
 
   private buildJwtPayload(user: {
@@ -225,13 +247,12 @@ export class AuthService implements OnModuleInit {
   }
 
   async signup(signupDto: SignupDto): Promise<ReturnMessageDto> {
-    const { firstName, lastName, email, password } = signupDto;
+    const { firstName, lastName, password } = signupDto;
+    const email = normalizeEmail(signupDto.email);
 
     this.logger.debug('Signup initiated', { email });
 
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email },
-    });
+    const existingUser = await this.findUserByEmail(signupDto.email);
 
     if (existingUser) {
       throw new ConflictException('Email already exists');
@@ -292,9 +313,7 @@ export class AuthService implements OnModuleInit {
     const { email, password } = loginDto;
 
     // Find user by email
-    const user = await this.prisma.user.findUnique({
-      where: { email },
-    });
+    const user = await this.findUserByEmail(email);
 
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
@@ -411,9 +430,7 @@ export class AuthService implements OnModuleInit {
   }
 
   async resendConfirmation(email: string): Promise<ReturnMessageDto> {
-    const user = await this.prisma.user.findUnique({
-      where: { email },
-    });
+    const user = await this.findUserByEmail(email);
 
     if (!user) {
       // Don't reveal if email exists or not (security)
@@ -453,9 +470,10 @@ export class AuthService implements OnModuleInit {
       });
     }
 
-    // Queue confirmation email (async via BullMQ)
+    // Queue confirmation email (async via BullMQ). Sent to the stored
+    // address, never the typed one.
     await this.notificationQueue.add('confirmation-email', {
-      to: email,
+      to: user.email,
       subject: 'Verify your email',
       html: `
         <h1>Email Verification</h1>
@@ -472,11 +490,7 @@ export class AuthService implements OnModuleInit {
   async forgotPassword(
     forgotPasswordDto: ForgotPasswordDto,
   ): Promise<ReturnMessageDto> {
-    const { email } = forgotPasswordDto;
-
-    const user = await this.prisma.user.findUnique({
-      where: { email },
-    });
+    const user = await this.findUserByEmail(forgotPasswordDto.email);
 
     // Don't reveal if email exists or not (security)
     if (!user) {
@@ -515,9 +529,10 @@ export class AuthService implements OnModuleInit {
       this.logger.debug('Password reset token generated', { resetUrl });
     }
 
-    // Queue password reset email (async via BullMQ)
+    // Queue password reset email (async via BullMQ). Sent to the stored
+    // address, never the typed one.
     await this.notificationQueue.add('password-reset', {
-      to: email,
+      to: user.email,
       subject: 'Reset your password',
       html: `
         <h1>Password Reset</h1>
