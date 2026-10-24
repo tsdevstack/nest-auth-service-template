@@ -841,7 +841,7 @@ if (!isDockerAvailable()) {
           // client's connection dropped
           await client.flushall();
           await client
-            .client('KILL', 'TYPE', 'normal', 'SKIPME', 'no')
+            .call('CLIENT', 'KILL', 'TYPE', 'normal', 'SKIPME', 'no')
             .catch(() => undefined);
           await new Promise((resolve) => setTimeout(resolve, 300));
           const deadline = Date.now() + 10_000;
