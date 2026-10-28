@@ -42,6 +42,8 @@ export class AuthService implements OnModuleInit {
   private readonly refreshTokenTtl: number;
   private readonly confirmationTokenTtl: number;
   private bcryptRounds!: number;
+  /** Checked when a login names an unknown email, so it takes as long as a wrong password */
+  private dummyPasswordHash!: string;
   private appUrl!: string;
   private readonly logger: LoggerService;
   /** Until when ADMIN_EMAILS is known to be missing or empty (epoch ms) */
@@ -74,6 +76,10 @@ export class AuthService implements OnModuleInit {
     // Load secrets on module initialization
     this.bcryptRounds =
       parseInt(await this.secrets.get('BCRYPT_ROUNDS'), 10) || 12;
+    this.dummyPasswordHash = await bcrypt.hash(
+      randomBytes(16).toString('hex'),
+      this.bcryptRounds,
+    );
     this.appUrl = await this.secrets.get('APP_URL');
   }
 
@@ -316,6 +322,9 @@ export class AuthService implements OnModuleInit {
     const user = await this.findUserByEmail(email);
 
     if (!user) {
+      // Same work as a wrong password: the response time must not show
+      // whether the email is registered
+      await bcrypt.compare(password, this.dummyPasswordHash);
       throw new UnauthorizedException('Invalid credentials');
     }
 

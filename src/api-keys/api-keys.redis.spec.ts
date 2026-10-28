@@ -358,7 +358,7 @@ if (!isDockerAvailable()) {
         ).toBe('revoked');
         expect(
           await client.call('EXPIRETIME', buildApiKeyRecordKey(row.keyHash)),
-        ).toBe(nowSeconds() - 3600 + DAY);
+        ).toBe(Math.floor(revokedAt.getTime() / 1000) + DAY);
         expect(prisma.writes).toBe(0);
       });
 

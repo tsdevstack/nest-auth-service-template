@@ -251,6 +251,21 @@ describe('AuthService', () => {
       );
     });
 
+    it('should check the password against a dummy hash for an unknown email', async () => {
+      (bcrypt.hash as jest.Mock).mockResolvedValue('dummy-hash');
+      await service.onModuleInit();
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.login(loginDto)).rejects.toThrow(
+        'Invalid credentials',
+      );
+      expect(bcrypt.hash).toHaveBeenCalledWith(expect.any(String), 12);
+      expect(bcrypt.compare).toHaveBeenCalledWith(
+        loginDto.password,
+        'dummy-hash',
+      );
+    });
+
     it('should throw UnauthorizedException for wrong password', async () => {
       mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
