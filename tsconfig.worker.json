@@ -1,0 +1,9 @@
+// Local development only (start-worker:dev): the worker compiles into its own
+// folder, so the service and its worker, both started by `npm run dev`, don't
+// delete and rewrite each other's dist. Builds for deployment use dist.
+{
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": {
+    "outDir": "./node_modules/.cache/worker-dev"
+  }
+}

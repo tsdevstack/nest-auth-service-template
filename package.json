@@ -32,12 +32,14 @@
     "test:e2e": "NODE_OPTIONS=--experimental-vm-modules jest --config ./test/jest-e2e.json",
     "tsc": "tsc --noEmit",
     "dev": "nest start --watch",
+    "start-worker:dev": "nest start --entryFile worker --watch --path tsconfig.worker.json",
+    "start-worker": "node dist/worker.js",
     "docs:generate": "ts-node --transpile-only scripts/generate-openapi.ts",
     "client:generate": "tsdevstack generate-client --input ./docs/openapi.json",
     "db:seed": "npx prisma db seed"
   },
   "dependencies": {
-    "@tsdevstack/nest-common": "^0.11.0",
+    "@tsdevstack/nest-common": "^0.12.0",
     "@nestjs/common": "^12.2.0",
     "@nestjs/config": "^12.0.1",
     "@nestjs/core": "^12.2.0",

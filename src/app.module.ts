@@ -19,7 +19,6 @@ import {
   BullConfigModule,
 } from '@tsdevstack/nest-common';
 import { PrismaModule } from './prisma/prisma.module';
-import { ProcessorsModule } from './processors/processors.module';
 
 @Module({
   imports: [
@@ -39,7 +38,6 @@ import { ProcessorsModule } from './processors/processors.module';
     EmailRateLimitModule,
     NotificationModule,
     BullConfigModule.forRoot(),
-    ProcessorsModule,
     JobsModule,
   ],
   providers: [

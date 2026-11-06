@@ -292,7 +292,7 @@ export class AuthService implements OnModuleInit {
       });
     });
 
-    const confirmationUrl = `${this.appUrl}/confirm?token=${confirmationToken.token}`;
+    const confirmationUrl = `${this.appUrl}/confirm#token=${confirmationToken.token}`;
 
     // Log confirmation link in development (useful for testing without email)
     if (process.env.NODE_ENV === 'development') {
@@ -470,7 +470,7 @@ export class AuthService implements OnModuleInit {
       },
     });
 
-    const confirmationUrl = `${this.appUrl}/confirm?token=${confirmationToken.token}`;
+    const confirmationUrl = `${this.appUrl}/confirm#token=${confirmationToken.token}`;
 
     // Log confirmation link in development (useful for testing without email)
     if (process.env.NODE_ENV === 'development') {
@@ -532,7 +532,7 @@ export class AuthService implements OnModuleInit {
       },
     });
 
-    const resetUrl = `${this.appUrl}/reset-password?token=${resetToken.token}`;
+    const resetUrl = `${this.appUrl}/reset-password#token=${resetToken.token}`;
 
     if (process.env.NODE_ENV === 'development') {
       this.logger.debug('Password reset token generated', { resetUrl });
