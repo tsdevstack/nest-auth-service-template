@@ -132,4 +132,16 @@ describe('NotificationProcessor', () => {
       expect(() => processor.onFailed(undefined, error)).not.toThrow();
     });
   });
+
+  describe('worker options', () => {
+    it("should send up to 5 emails at once and hold the queue to Resend's 10 per second", () => {
+      // The key @nestjs/bullmq's @Processor stores the worker options under
+      expect(
+        Reflect.getMetadata('bullmq:worker_metadata', NotificationProcessor),
+      ).toEqual({
+        concurrency: 5,
+        limiter: { max: 10, duration: 1000 },
+      });
+    });
+  });
 });

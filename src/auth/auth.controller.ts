@@ -161,7 +161,6 @@ export class AuthController {
       'Confirmation email sent successfully (or generic response for security)',
     type: ReturnMessageDto,
   })
-  @ApiResponse({ status: 401, description: 'Email already confirmed' })
   @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
   @UseGuards(RateLimitGuard, EmailRateLimitGuard)
   @RateLimitDecorator({

@@ -439,14 +439,16 @@ export class AuthService implements OnModuleInit {
   }
 
   async resendConfirmation(email: string): Promise<ReturnMessageDto> {
+    // One answer whether the address is unknown, already confirmed or gets
+    // a new link: it never says whether an account exists
+    const answer: ReturnMessageDto = {
+      message:
+        'If this email is registered, a confirmation email has been sent.',
+    };
     const user = await this.findUserByEmail(email);
 
     if (!user) {
-      // Don't reveal if email exists or not (security)
-      return {
-        message:
-          'If this email is registered, a confirmation email has been sent.',
-      };
+      return answer;
     }
 
     // Clean up existing tokens regardless of confirmation status
@@ -455,7 +457,7 @@ export class AuthService implements OnModuleInit {
     });
 
     if (user.confirmed) {
-      throw new UnauthorizedException('Email already confirmed');
+      return answer;
     }
 
     // Generate and create new confirmation token (hash before storage)
@@ -493,7 +495,7 @@ export class AuthService implements OnModuleInit {
       `,
     });
 
-    return { message: 'Confirmation email sent. Please check your inbox.' };
+    return answer;
   }
 
   async forgotPassword(

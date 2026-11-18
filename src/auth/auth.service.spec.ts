@@ -902,7 +902,7 @@ describe('AuthService', () => {
 
       const result = await service.resendConfirmation(mockUser.email);
 
-      expect(result.message).toContain('Confirmation email sent');
+      expect(result.message).toContain('If this email is registered');
       expect(mockNotificationQueue.add).toHaveBeenCalled();
     });
 
@@ -917,19 +917,19 @@ describe('AuthService', () => {
       expect(mockNotificationQueue.add).not.toHaveBeenCalled();
     });
 
-    it('should throw if email already confirmed', async () => {
+    it('should answer a confirmed address as any other, and send nothing', async () => {
       mockPrismaService.user.findUnique.mockResolvedValue({
         ...mockUser,
         confirmed: true,
       });
       mockPrismaService.confirmationToken.deleteMany.mockResolvedValue({});
 
-      await expect(service.resendConfirmation(mockUser.email)).rejects.toThrow(
-        UnauthorizedException,
+      const result = await service.resendConfirmation(mockUser.email);
+
+      expect(result.message).toBe(
+        'If this email is registered, a confirmation email has been sent.',
       );
-      await expect(service.resendConfirmation(mockUser.email)).rejects.toThrow(
-        'Email already confirmed',
-      );
+      expect(mockNotificationQueue.add).not.toHaveBeenCalled();
     });
   });
 });
